@@ -1,46 +1,117 @@
-# Getting Started with Create React App
+# React 18 - Features and Migration Guide
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
 
-## Available Scripts
 
-In the project directory, you can run:
+## 1. `ReactDOM.render` is replaced with `ReactDOM.createRoot`
 
-### `yarn start`
+```jsx
+const rootElement = document.getElementById("root");
+if (!rootElement) throw new Error("Failed to find the root element");
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in the browser.
+ReactDOM.createRoot(rootElement).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
+```
 
-The page will reload if you make edits.\
-You will also see any lint errors in the console.
+Two different parts of the page can be rendered with different root APIs. We can selectively migrate our applications to React 18.
 
-### `yarn test`
+```jsx
+const rootElement1 = document.getElementById("root1");
+if (!rootElement1) throw new Error("Failed to find the root element");
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+ReactDOM.createRoot(rootElement1).render(
+  <React.StrictMode>
+    <App root="18" />
+  </React.StrictMode>
+);
 
-### `yarn build`
+const rootElement2 = document.getElementById("root2");
+if (!rootElement2) throw new Error("Failed to find the root element");
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+ReactDOM.render(
+  // Behaves as if its running React 17
+  <React.StrictMode>
+    <App root="17" />
+  </React.StrictMode>,
+  rootElement2
+);
+```
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+We can migrate to React 18 through conditional rendering supported by feature flags / environmental variables
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+```jsx
+const REACT_18 = false; // Pass it via a feature flag / env variable
 
-### `yarn eject`
+if (REACT_18) {
+  ReactDOM.createRoot(rootElement1).render(
+    <React.StrictMode>
+      <App root="18" />
+    </React.StrictMode>
+  );
+} else {
+  ReactDOM.render(
+    // Behaves as if its running React 17
+    <React.StrictMode>
+      <App root="17" />
+    </React.StrictMode>,
+    rootElement2
+  );
+}
+```
 
-**Note: this is a one-way operation. Once you `eject`, you can’t go back!**
+## 2. Automatic Batching of state updates regardless of where they are called
 
-If you aren’t satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+```jsx
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you’re on your own.
+import { useState } from "react";
 
-You don’t have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn’t feel obligated to use this feature. However we understand that this tool wouldn’t be useful if you couldn’t customize it when you are ready for it.
+function App() {
 
-## Learn More
+  const [count, setCount] = useState(0);
+  const [isOdd, setIsOdd] = useState(true);
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+  const increment = () => {
+    setTimeout(() => {
+      console.log("Dummy async callback")
+      setCount((count) => count + 1);
+      setIsOdd((isOdd) =>  !isOdd);  
+    }, 0);
+  }
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+  /**
+   * In React 17, if our callback ( increment ) has an async action , then the component is re-rendered twice in this case, unless wrapped with ReactDOM.unstable_batchedUpdates
+   * If the callback doesn't have an async action then the multiple state updates are batched to a single update and the component is re-rendered only once.
+   * In React 18, automatic batching of state updates happens always . So regardless of our function has async actions or not the component is re-rendered only once.
+   */
+  console.log("Re-rendered"); // 2 times in React 17 but only once in React 18
+
+  return (
+    <div className="App">
+      <div> Count  = {count} </div>
+      <div> Is Odd = {isOdd} </div>
+      <button onClick={increment}>Increment</button>
+    </div>
+  );
+}
+
+export default App;
+
+```
+Top opt out of this behavior we can simply use :
+
+```jsx
+
+  const increment = () => {
+    setTimeout(() => {
+      console.log("Dummy async callback")
+      ReactDOM.flushSync(() => {
+        setCount((count) => count + 1);
+      });
+      // setCount((count) => count + 1);
+      setIsOdd((isOdd) =>  !isOdd);  // Re-rendered twice
+    }, 0);
+  }
+```
+
